@@ -14,7 +14,7 @@ Usage
 
 	1. clone the repository to your machine
 
-	   git clone https://github.com/justdoit0823/proxyserver /yourworkpath
+	   git clone https://github.com/justdoit0823/proxyserver.git /yourworkpath
 
 	2. make the project
 

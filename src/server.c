@@ -24,10 +24,6 @@ void serverstop(int signum);
 
 int main(int argc,char * argv[])
 {
-  /*if(argc < 4){
-    printf("usage:a.out <host> <port> <logfile>.\n");
-    exit(-1);
-    }*/
   struct Arguments arg;
   int r;
   addLongOption("host", required_argument, 0, 'i');
