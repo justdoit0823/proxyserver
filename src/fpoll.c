@@ -21,6 +21,8 @@ static List * handlelist, * freeProxylist, * freeDispatchlist;
 
 static struct DispatchList * dispatchlist = NULL;
 
+static struct DispatchList * freedispatchs = NULL;
+
 int initepoll(int size)
 {
   //int fd;
@@ -127,13 +129,13 @@ void runepoll(int epfd, int listenfd)
 	else{
 	  if(freeProxylist == NULL){
 	    proxycon = newProxyConnect(eventfd, backevents, handlehost);
-	    nl = newListItem();
+	    nl = newListNode();
 	    nl->item = (struct HTTPConnection *)proxycon;
 	  }
 	  else{
 	    nl = freeProxylist;
 	    proxycon = (struct ProxyConnection *)nl->item;
-	    freeProxylist = freeProxylist->next;
+	    rmFromList(&freeProxylist, nl);
 	    proxycon->con.fd = eventfd;
 	    proxycon->con.events = backevents;
 	    proxycon->con.fun = handlehost;
@@ -216,13 +218,30 @@ int handlehost(struct HTTPConnection * p)
 	      logerr("add remote fd to epoll error", errno);
 	      return -1;
 	    }
-	    List * pl = newListItem();
+	    List * pl;
 	    struct DispatchConnection * dispatchcon;
-	    dispatchcon = newDispatchConnect(dispatchfd, handleremote, proxy);
+	    if(freeDispatchlist == NULL){
+	      pl = newListNode();
+	      dispatchcon = newDispatchConnect(dispatchfd, handleremote, proxy);
+	    }
+	    else{
+	      pl = freeDispatchlist;
+	      rmFromList(&freeDispatchlist, pl);
+	      dispatchcon = (struct DispatchConnection *)(pl->item);
+	      dispatchcon->con.fd = dispatchfd;
+	      dispatchcon->con.fun = handleremote;
+	      dispatchcon->proxy = proxy;
+	    }
 	    proxy->dispatch = dispatchcon;
 	    AddConnectToManager(dispatchfd, dispatchcon);
 	    struct DispatchList * dl;
-	    dl = malloc(sizeof(*dl));
+	    if(freedispatchs == NULL){
+	      dl = malloc(sizeof(*dl));
+	    }
+	    else{
+	      dl = freedispatchs;
+	      rmFromDispatchlist(&freedispatchs, dl);
+	    }
 	    dl->dispatch = dispatchcon;
 	    AddDispatchConnect(&dispatchlist, dl);
 	    pl->item = (struct HTTPConnection *)dispatchcon;
@@ -244,6 +263,9 @@ int handlehost(struct HTTPConnection * p)
       if(dispatch != NULL && dispatch->con.fd != NULLFD){
 	dispatch->proxy = NULL;
       }
+      List * node = findListNode(handlelist, (struct HTTPConnection *)proxy);
+      rmFromList(&handlelist, node);
+      addToList(&freeProxylist, node);
     }
   }
   if(proxy->con.events & EPOLLOUT){
@@ -335,6 +357,12 @@ int handleremote(struct HTTPConnection * p)
       RmConnectFromManager(dispatch->con.fd);
       dispatch->con.events = 0;
       dispatch->con.fd = NULLFD;
+      List * node = findListNode(handlelist, (struct HTTPConnection *)dispatch);
+      rmFromList(&handlelist, node);
+      addToList(&freeDispatchlist, node);
+      struct DispatchList * dispatchnode = findDispatchNode(dispatchlist, dispatch);
+      rmFromDispatchlist(&dispatchlist, dispatchnode);
+      AddDispatchConnect(&freedispatchs, dispatchnode);
     }
   }
   return 0;

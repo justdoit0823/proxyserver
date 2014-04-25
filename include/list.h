@@ -24,6 +24,8 @@ int addToList(List ** head, List * list);
 
 int rmFromList(List ** head, List * list);
 
-List * newListItem();
+List * findListNode(List * search, ListItem * item);
+
+List * newListNode(void);
 
 #endif

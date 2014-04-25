@@ -105,6 +105,16 @@ struct ProxyConnection * newProxyConnect(int fd, int events, callbackfun callbac
   return proxy;
 }
 
+int freeProxyConnect(struct ProxyList ** proxylist, struct ProxyList * proxy)
+{
+  if(proxy == NULL) return -1;
+  proxy->prev = NULL;
+  proxy->next = *proxylist;
+  if(*proxylist != NULL) (*proxylist)->prev = proxy;
+  *proxylist = proxy;
+  return 0;
+}
+
 struct DispatchConnection * newDispatchConnect(int fd, callbackfun callback, struct ProxyConnection * proxy)
 {
   struct DispatchConnection * dispatch = NULL;
@@ -123,6 +133,15 @@ struct DispatchConnection * newDispatchConnect(int fd, callbackfun callback, str
   return dispatch;
 }
 
+int freeDispatchConnect(struct DispatchList ** dispatchlist, struct DispatchList * dispatch)
+{
+  if(dispatch == NULL) return -1;
+  dispatch->prev = NULL;
+  dispatch->next = *dispatchlist;
+  if(*dispatchlist != NULL) (*dispatchlist)->prev = dispatch;
+  *dispatchlist = dispatch;
+  return 0;
+}
 
 struct ConnectManager * GetManager()
 {
@@ -165,48 +184,6 @@ int DispatchResulted(const struct DispatchConnection * dispatch)
   return 0;
 }
 
-/*
-int newProxyDispatch(struct ProxyConnection * proxy)
-{
-  struct DispatchConnection * dispatch;
-  dispatch = proxy->dispatch;
-  if(dispatch != NULL) return -1;
-  if(proxy->header.host[0] != '\0'){
-    if((dispatchfd = connecthost(proxy->header.host, proxy->header.port)) == -1) return -1;
-    printf("connect success.\n");
-    if(setnonblock(dispatchfd) == -1){
-      logwarn("set fd nonblock error.\n");
-      close(dispatchfd);
-      return -1;
-    }
-    if(addtoepoll(epfd, dispatchfd, ETINOUT) !=0 ){
-      logerr("add remote fd to epoll error", errno);
-      return -1;
-    }
-    List * pl = newListItem();
-    struct DispatchConnection * dispatchcon;
-    dispatchcon = newDispatchConnect();
-    dispatchcon->status = PROXY_USED;
-    dispatchcon->con.fd = dispatchfd;
-    dispatchcon->con.events = 0;
-    dispatchcon->con.fun = handleremote;
-    dispatchcon->proxy = proxy;
-    proxy->dispatch = dispatchcon;
-    strcpy(dispatchcon->host, proxy->header.host);
-    AddConnectToManager(dispatchfd, dispatchcon);
-    struct DispatchList * dl;
-    dl = malloc(sizeof(*dl));
-    dl->dispatch = dispatchcon;
-    AddDispatchConnect(&dispatchlist, dl);
-    pl->item = (struct HTTPConnection *)dispatchcon;
-    addToList(&handlelist, pl);
-    printf("add a list node %p,%p.\n", handlelist, pl->item);
-  }
-  return 0;
-}
-*/
-
-
 int cleanDispatchResponse(struct DispatchConnection * dispatch)
 {
   struct ProxyConnection * proxy;
@@ -236,5 +213,30 @@ int cleanProxyRequest(struct ProxyConnection * proxy)
   dispatch->con.buf->outBytes = 0;
   dispatch->con.buf->wrReady = 0;
   dispatch->con.buf->wrBuf = NULL;
+  return 0;
+}
+
+struct DispatchList * findDispatchNode(struct DispatchList * search, struct DispatchConnection * item)
+{
+  if(item == NULL) return NULL;
+  for(; search != NULL; search=search->next){
+    if(search->dispatch == item) return search;
+  }
+  return NULL;
+}
+
+int rmFromDispatchlist(struct DispatchList ** head, struct DispatchList * node)
+{
+  if(node == NULL) return -1;
+  if(node->prev == NULL){
+    *head = node->next;
+    if(*head != NULL) (*head)->prev = NULL;
+  }
+  else{
+    node->prev->next = node->next;
+    if(node->next != NULL) node->next->prev = node->prev;
+  }
+  node->prev = NULL;
+  node->next = NULL;
   return 0;
 }

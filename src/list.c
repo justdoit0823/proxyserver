@@ -11,6 +11,11 @@
 
 int addToList(List ** head, List * list)
 {
+  /*
+    add list node to the double linked list.
+  */
+
+  if(list == NULL) return -1;
   list->next = *head;
   list->prev = NULL;
   if(*head != NULL) (*head)->prev = list;
@@ -20,6 +25,7 @@ int addToList(List ** head, List * list)
 
 int rmFromList(List ** head, List * list)
 {
+  if(list == NULL) return -1;
   if(list->prev == NULL){
     *head = list->next;
     if(*head != NULL) (*head)->prev = NULL;
@@ -28,10 +34,21 @@ int rmFromList(List ** head, List * list)
     list->prev->next = list->next;
     if(list->next != NULL) list->next->prev = list->prev;
   }
+  list->prev = NULL;
+  list->next = NULL;
   return 0;
 }
 
-List * newListItem()
+List * findListNode(List * search, ListItem * item)
+{
+  if(item == NULL) return NULL;
+  for(; search != NULL; search=search->next){
+    if(search->item == item) return search;
+  }
+  return NULL;
+}
+
+List * newListNode()
 {
   List * nl = NULL;
   nl = malloc(sizeof(List));
