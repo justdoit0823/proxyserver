@@ -14,6 +14,8 @@
 
 #include "http.h"
 
+#include "list.h"
+
 enum{
   /*
     proxy connection status for the specified socket
@@ -41,19 +43,6 @@ struct DispatchConnection{
   struct responseHeader header;
 };
 
-struct DispatchList{
-  struct DispatchConnection * dispatch;
-  struct DispatchList * prev;
-  struct DispatchList * next;
-};
-
-struct ProxyList{
-  struct ProxyConnection * dispatch;
-  struct ProxyList * prev;
-  struct ProxyList * next;
-};
-
-
 struct ConnectManager{
   int count;
   void * conlist[MAXCONNECTIONS];
@@ -61,11 +50,7 @@ struct ConnectManager{
 
 static struct ConnectManager manager;
 
-int AddDispatchConnect(struct DispatchList ** list, struct DispatchList * dispatch);
-
-struct DispatchConnection * FindDispatchConnect(struct DispatchList * list, const char * host,  int status);
-
-int RemoveDispatchConnect(struct DispatchList ** list, struct DispatchList * dispatch);
+struct DispatchConnection * FindDispatchConnect(List * list, const char * host,  int status);
 
 int initConnectManager();
 
@@ -77,11 +62,7 @@ struct ConnectManager * GetManager();
 
 struct ProxyConnection * newProxyConnect(int fd, int events, callbackfun callback);
 
-int freeProxyConnect(struct ProxyList ** proxylist, struct ProxyList * proxy);
-
 struct DispatchConnection * newDispatchConnect(int fd, callbackfun callback, struct ProxyConnection * proxy);
-
-int freeDispatchConnect(struct DispatchList ** dispatchlist, struct DispatchList * dispatch);
 
 int notifyDispatchResponse(struct DispatchConnection * dispatch);
 
@@ -94,9 +75,5 @@ int newProxyDispatch(struct ProxyConnection * proxy);
 int cleanDispatchResponse(struct DispatchConnection * dispatch);
 
 int cleanProxyRequest(struct ProxyConnection * proxy);
-
-struct DispatchList * findDispatchNode(struct DispatchList * search, struct DispatchConnection * item);
-
-int rmFromDispatchlist(struct DispatchList ** head, struct DispatchList * node);
 
 #endif

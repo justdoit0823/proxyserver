@@ -6,6 +6,12 @@
 
 */
 
+/*
+  A simple double linked list implement.
+
+*/
+
+
 #ifndef LIST_H
 #define LIST_H
 

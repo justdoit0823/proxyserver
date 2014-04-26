@@ -14,47 +14,25 @@
 #include "logging.h"
 #include "errno.h"
 
-int AddDispatchConnect(struct DispatchList ** list, struct DispatchList * dispatch)
-{
-  if(list == NULL) return -1;
-  dispatch->next = *list;
-  dispatch->prev = NULL;
-  if(*list != NULL) (*list)->prev = dispatch;
-  *list = dispatch;
-  return 0;
-}
 
-struct DispatchConnection * FindDispatchConnect(struct DispatchList * list, const char * host, int status)
+struct DispatchConnection * FindDispatchConnect(List * list, const char * host, int status)
 {
   /*
     if status is greater than 0, then status is the search condition.
   */
 
   if(host == NULL) return NULL;
-  struct DispatchList * pcon;
+  List * pcon;
+  struct DispatchConnection * dispatch;
   for(pcon=list; pcon != NULL; pcon=pcon->next){
-    if(strcmp(host, pcon->dispatch->host) == 0){
-      if(status == 0) return pcon->dispatch;
-      else if(status > 0 && status == pcon->dispatch->status) return pcon->dispatch;
+    dispatch = (struct DispatchConnection *)(pcon->item);
+    if(strcmp(host, dispatch->host) == 0){
+      if(status == 0) return dispatch;
+      else if(status > 0 && (status == dispatch->status)) return dispatch;
     }
   }
   return NULL;
 }
-
-int RemoveDispatchConnect(struct DispatchList ** list, struct DispatchList * dispatch)
-{
-  if(list == NULL) return -1;
-  if(dispatch->prev == NULL){
-    *list = dispatch->next;
-    if(*list != NULL) (*list)->prev = NULL;
-  }
-  else{
-    dispatch->prev->next = dispatch->next;
-    if(dispatch->next != NULL) dispatch->next->prev = dispatch->prev;
-  }
-  return 0;
-}
-
 
 int initConnectManager()
 {
@@ -105,16 +83,6 @@ struct ProxyConnection * newProxyConnect(int fd, int events, callbackfun callbac
   return proxy;
 }
 
-int freeProxyConnect(struct ProxyList ** proxylist, struct ProxyList * proxy)
-{
-  if(proxy == NULL) return -1;
-  proxy->prev = NULL;
-  proxy->next = *proxylist;
-  if(*proxylist != NULL) (*proxylist)->prev = proxy;
-  *proxylist = proxy;
-  return 0;
-}
-
 struct DispatchConnection * newDispatchConnect(int fd, callbackfun callback, struct ProxyConnection * proxy)
 {
   struct DispatchConnection * dispatch = NULL;
@@ -127,20 +95,10 @@ struct DispatchConnection * newDispatchConnect(int fd, callbackfun callback, str
   dispatch->con.fd = fd;
   dispatch->con.events = 0;
   dispatch->con.fun = callback;
-  dispatch->con.buf = initHTTPBuffer(4096*32);
+  dispatch->con.buf = initHTTPBuffer(4096*64);
   dispatch->proxy = proxy;
   strcpy(dispatch->host, proxy->header.host);
   return dispatch;
-}
-
-int freeDispatchConnect(struct DispatchList ** dispatchlist, struct DispatchList * dispatch)
-{
-  if(dispatch == NULL) return -1;
-  dispatch->prev = NULL;
-  dispatch->next = *dispatchlist;
-  if(*dispatchlist != NULL) (*dispatchlist)->prev = dispatch;
-  *dispatchlist = dispatch;
-  return 0;
 }
 
 struct ConnectManager * GetManager()
@@ -191,7 +149,6 @@ int cleanDispatchResponse(struct DispatchConnection * dispatch)
   memset(dispatch->con.buf->rdBuf, 0, dispatch->con.buf->bufferedBytes);
   dispatch->con.buf->bufferedBytes = 0;
   dispatch->con.buf->rdEOF = 0;
-  memset(dispatch->host, 0, sizeof(dispatch->host));
   memset(&(dispatch->header), 0, sizeof(dispatch->header));
   dispatch->proxy = NULL;
   dispatch->status = PROXY_FREE;
@@ -213,30 +170,5 @@ int cleanProxyRequest(struct ProxyConnection * proxy)
   dispatch->con.buf->outBytes = 0;
   dispatch->con.buf->wrReady = 0;
   dispatch->con.buf->wrBuf = NULL;
-  return 0;
-}
-
-struct DispatchList * findDispatchNode(struct DispatchList * search, struct DispatchConnection * item)
-{
-  if(item == NULL) return NULL;
-  for(; search != NULL; search=search->next){
-    if(search->dispatch == item) return search;
-  }
-  return NULL;
-}
-
-int rmFromDispatchlist(struct DispatchList ** head, struct DispatchList * node)
-{
-  if(node == NULL) return -1;
-  if(node->prev == NULL){
-    *head = node->next;
-    if(*head != NULL) (*head)->prev = NULL;
-  }
-  else{
-    node->prev->next = node->next;
-    if(node->next != NULL) node->next->prev = node->prev;
-  }
-  node->prev = NULL;
-  node->next = NULL;
   return 0;
 }

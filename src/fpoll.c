@@ -17,19 +17,30 @@
 #include "errno.h"
 #include "connection.h"
 
-static List * handlelist, * freeProxylist, * freeDispatchlist;
+static List * proxylist = NULL; /* active http proxy connection list */
 
-static struct DispatchList * dispatchlist = NULL;
+/* 
+   inactive http proxy connection list,
+   which can be reused in later http proxy conenction.
+*/
 
-static struct DispatchList * freedispatchs = NULL;
+static List * freeProxylist = NULL; 
+
+
+/* 
+   inactive http dispatch connection list,
+   which can be reused in later http dispatch conenction.
+*/
+
+static List * freeDispatchlist = NULL;
+
+static List * dispatchlist = NULL; /* active http dispatch connection list */
+
 
 int initepoll(int size)
 {
   //int fd;
   int i;
-  handlelist = NULL;
-  freeProxylist = NULL;
-  freeDispatchlist = NULL;
   for(i=0; i < MAXFD; i++) connections[i] = NULL;
   epfd = epoll_create(size);
   return epfd;
@@ -130,7 +141,7 @@ void runepoll(int epfd, int listenfd)
 	  if(freeProxylist == NULL){
 	    proxycon = newProxyConnect(eventfd, backevents, handlehost);
 	    nl = newListNode();
-	    nl->item = (struct HTTPConnection *)proxycon;
+	    nl->item = (ListItem *)proxycon;
 	  }
 	  else{
 	    nl = freeProxylist;
@@ -141,11 +152,27 @@ void runepoll(int epfd, int listenfd)
 	    proxycon->con.fun = handlehost;
 	  }
 	  AddConnectToManager(eventfd, proxycon);
-	  addToList(&handlelist, nl);
+	  addToList(&proxylist, nl);
 	}
       }
     }
-    for(pcon=handlelist; pcon != NULL; pcon = pnext){
+    /*
+      do the proxy list loop
+
+    */
+
+    for(pcon = proxylist; pcon != NULL; pcon = pnext){
+      pitem = pcon->item;
+      pnext = pcon->next;
+      (pitem->fun)(pitem);
+    }
+
+    /*
+      do the dispatch list loop
+
+    */
+    
+    for(pcon = dispatchlist; pcon != NULL; pcon = pnext){
       pitem = pcon->item;
       pnext = pcon->next;
       (pitem->fun)(pitem);
@@ -174,9 +201,9 @@ int handlehost(struct HTTPConnection * p)
       }
     }
     proxyclosed = 0;
+    proxy->con.events &= ~EPOLLIN;
     hrsum = recvfromhost(proxy->con.fd, proxy->con.buf->rdBuf + proxy->con.buf->bufferedBytes, &proxyclosed);
     if(hrsum > 0){
-      proxy->con.events &= ~EPOLLIN;
       printf("recv %d bytes from host.\n", hrsum);
       proxy->con.buf->bufferedBytes += hrsum;
       if(proxy->header.parsePass != 1){
@@ -233,19 +260,9 @@ int handlehost(struct HTTPConnection * p)
 	      dispatchcon->proxy = proxy;
 	    }
 	    proxy->dispatch = dispatchcon;
+	    pl->item = (ListItem *)dispatchcon;
 	    AddConnectToManager(dispatchfd, dispatchcon);
-	    struct DispatchList * dl;
-	    if(freedispatchs == NULL){
-	      dl = malloc(sizeof(*dl));
-	    }
-	    else{
-	      dl = freedispatchs;
-	      rmFromDispatchlist(&freedispatchs, dl);
-	    }
-	    dl->dispatch = dispatchcon;
-	    AddDispatchConnect(&dispatchlist, dl);
-	    pl->item = (struct HTTPConnection *)dispatchcon;
-	    addToList(&handlelist, pl);
+	    addToList(&dispatchlist, pl);
 	  }
 	}
       }
@@ -263,8 +280,8 @@ int handlehost(struct HTTPConnection * p)
       if(dispatch != NULL && dispatch->con.fd != NULLFD){
 	dispatch->proxy = NULL;
       }
-      List * node = findListNode(handlelist, (struct HTTPConnection *)proxy);
-      rmFromList(&handlelist, node);
+      List * node = findListNode(proxylist, (ListItem *)proxy);
+      rmFromList(&proxylist, node);
       addToList(&freeProxylist, node);
     }
   }
@@ -301,7 +318,7 @@ int handleremote(struct HTTPConnection * p)
   int parseResult, dispatchclosed;
   if(dispatch == NULL) return -1;
   if(dispatch->con.buf == NULL){
-    dispatch->con.buf = initHTTPBuffer(4096*32);
+    dispatch->con.buf = initHTTPBuffer(4096*64);
     if(dispatch->con.buf == NULL){
       logerr("can't alloc memory", errno);
       return -1;
@@ -328,9 +345,9 @@ int handleremote(struct HTTPConnection * p)
     char * bufpos = dispatch->con.buf->rdBuf + dispatch->con.buf->bufferedBytes;
     dispatchclosed = 0;
     proxy = dispatch->proxy;
+    dispatch->con.events &= ~EPOLLIN;
     rrsum = recvfromhost(dispatch->con.fd, bufpos, &dispatchclosed);
     if(rrsum > 0){
-      dispatch->con.events &= ~EPOLLIN;
       dispatch->con.buf->bufferedBytes += rrsum;
       printf("recv %d bytes from remote,total is %d.\n", rrsum, dispatch->con.buf->bufferedBytes);
       if(dispatch->header.parsePass != 1){
@@ -347,22 +364,15 @@ int handleremote(struct HTTPConnection * p)
 	 that the response is over.
       */
 
-      /*if(strcasecmp(dispatch->header.version, "HTTP/1.0") == 0){
-	printf("request %s is finished.\n", proxy->header.uri);
-	notifyDispatchResponse(dispatch);
-	}*/
       if(dispatch->con.buf->rdEOF != 1) notifyDispatchResponse(dispatch);
       rmfromepoll(epfd, dispatch->con.fd);
       close(dispatch->con.fd);
       RmConnectFromManager(dispatch->con.fd);
       dispatch->con.events = 0;
       dispatch->con.fd = NULLFD;
-      List * node = findListNode(handlelist, (struct HTTPConnection *)dispatch);
-      rmFromList(&handlelist, node);
+      List * node = findListNode(dispatchlist, (ListItem *)dispatch);
+      rmFromList(&dispatchlist, node);
       addToList(&freeDispatchlist, node);
-      struct DispatchList * dispatchnode = findDispatchNode(dispatchlist, dispatch);
-      rmFromDispatchlist(&dispatchlist, dispatchnode);
-      AddDispatchConnect(&freedispatchs, dispatchnode);
     }
   }
   return 0;
