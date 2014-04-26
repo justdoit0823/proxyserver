@@ -83,6 +83,37 @@ struct ProxyConnection * newProxyConnect(int fd, int events, callbackfun callbac
   return proxy;
 }
 
+List * getProxyNode(List ** queue, int fd, int events, callbackfun callback)
+{
+  List * nl;
+  struct ProxyConnection * proxycon;
+  if(*queue == NULL){
+    proxycon = newProxyConnect(fd, events, callback);
+    nl = newListNode();
+    nl->item = (ListItem *)proxycon;
+  }
+  else{
+    nl = *queue;
+    rmFromList(queue, nl);
+    proxycon = (struct ProxyConnection *)nl->item;
+    proxycon->status = PROXY_USED;
+    proxycon->con.fd = fd;
+    proxycon->con.events = events;
+    proxycon->con.fun = callback;
+  }
+  return nl;
+}
+
+int freeProxyConnect(struct ProxyConnection * proxy)
+{
+  if(proxy == NULL) return -1;
+  close(proxy->con.fd);
+  RmConnectFromManager(proxy->con.fd);
+  proxy->con.events = 0;
+  proxy->con.fd = NULLFD;
+  return 0;
+}
+
 struct DispatchConnection * newDispatchConnect(int fd, callbackfun callback, struct ProxyConnection * proxy)
 {
   struct DispatchConnection * dispatch = NULL;
@@ -99,6 +130,36 @@ struct DispatchConnection * newDispatchConnect(int fd, callbackfun callback, str
   dispatch->proxy = proxy;
   strcpy(dispatch->host, proxy->header.host);
   return dispatch;
+}
+
+List * getDispatchNode(List ** queue, int fd, callbackfun callback, struct ProxyConnection * proxy)
+{
+  List * pl;
+  struct DispatchConnection * dispatchcon;
+  if(*queue == NULL){
+    pl = newListNode();
+    dispatchcon = newDispatchConnect(fd, callback, proxy);
+    pl->item = (ListItem *)dispatchcon;
+  }
+  else{
+    pl = *queue;
+    rmFromList(queue, pl);
+    dispatchcon = (struct DispatchConnection *)(pl->item);
+    dispatchcon->con.fd = fd;
+    dispatchcon->con.fun = callback;
+    dispatchcon->proxy = proxy;
+  }
+  return pl;
+}
+
+int freeDispatchConnect(struct DispatchConnection * dispatch)
+{
+  if(dispatch == NULL) return -1;
+  close(dispatch->con.fd);
+  RmConnectFromManager(dispatch->con.fd);
+  dispatch->con.events = 0;
+  dispatch->con.fd = NULLFD;
+  return 0;
 }
 
 struct ConnectManager * GetManager()

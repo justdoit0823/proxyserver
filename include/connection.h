@@ -62,7 +62,15 @@ struct ConnectManager * GetManager();
 
 struct ProxyConnection * newProxyConnect(int fd, int events, callbackfun callback);
 
+List * getProxyNode(List ** queue, int fd, int events, callbackfun callback);
+
+int freeProxyConnect(struct ProxyConnection * proxy);
+
 struct DispatchConnection * newDispatchConnect(int fd, callbackfun callback, struct ProxyConnection * proxy);
+
+List * getDispatchNode(List ** queue, int fd, callbackfun callback, struct ProxyConnection * proxy);
+
+int freeDispatchConnect(struct DispatchConnection * dispatch);
 
 int notifyDispatchResponse(struct DispatchConnection * dispatch);
 

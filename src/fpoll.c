@@ -110,10 +110,10 @@ void runepoll(int epfd, int listenfd)
   struct epoll_event events[EVENTMAX];
   int i,nfds,requestfd,timeout;
   char logbuf[256];
-  List * pcon, * pnext, * nl;;
+  List * pcon, * pnext;
   ListItem * pitem;
   struct HTTPConnection * tempcon;
-  struct ProxyConnection * proxycon;
+  
   int eventfd, backevents;
   struct ConnectManager * mainmanager;
   initConnectManager();
@@ -138,19 +138,10 @@ void runepoll(int epfd, int listenfd)
 	  tempcon->events |= backevents;
 	}
 	else{
-	  if(freeProxylist == NULL){
-	    proxycon = newProxyConnect(eventfd, backevents, handlehost);
-	    nl = newListNode();
-	    nl->item = (ListItem *)proxycon;
-	  }
-	  else{
-	    nl = freeProxylist;
-	    proxycon = (struct ProxyConnection *)nl->item;
-	    rmFromList(&freeProxylist, nl);
-	    proxycon->con.fd = eventfd;
-	    proxycon->con.events = backevents;
-	    proxycon->con.fun = handlehost;
-	  }
+	  List * nl;
+	  struct ProxyConnection * proxycon;
+	  nl = getProxyNode(&freeProxylist, eventfd, backevents, handlehost);
+	  proxycon = (struct ProxyConnection *)nl->item;
 	  AddConnectToManager(eventfd, proxycon);
 	  addToList(&proxylist, nl);
 	}
@@ -232,10 +223,7 @@ int handlehost(struct HTTPConnection * p)
 	      if(dispatchfd != NULLFD){
 		close(dispatchfd);
 		rmfromepoll(epfd, proxy->con.fd);
-		close(proxy->con.fd);
-		RmConnectFromManager(proxy->con.fd);
-		proxy->con.events = 0;
-		proxy->con.fd = NULLFD;
+		freeProxyConnect(proxy);
 	      }
 	      return -1;
 	    }
@@ -247,22 +235,11 @@ int handlehost(struct HTTPConnection * p)
 	    }
 	    List * pl;
 	    struct DispatchConnection * dispatchcon;
-	    if(freeDispatchlist == NULL){
-	      pl = newListNode();
-	      dispatchcon = newDispatchConnect(dispatchfd, handleremote, proxy);
-	    }
-	    else{
-	      pl = freeDispatchlist;
-	      rmFromList(&freeDispatchlist, pl);
-	      dispatchcon = (struct DispatchConnection *)(pl->item);
-	      dispatchcon->con.fd = dispatchfd;
-	      dispatchcon->con.fun = handleremote;
-	      dispatchcon->proxy = proxy;
-	    }
-	    proxy->dispatch = dispatchcon;
-	    pl->item = (ListItem *)dispatchcon;
+	    pl = getDispatchNode(&freeDispatchlist, dispatchfd, handleremote, proxy);
+	    dispatchcon = (struct DispatchConnection *)(pl->item);
 	    AddConnectToManager(dispatchfd, dispatchcon);
 	    addToList(&dispatchlist, pl);
+	    proxy->dispatch = dispatchcon;
 	  }
 	}
       }
@@ -270,12 +247,9 @@ int handlehost(struct HTTPConnection * p)
 	notifyProxyRequest(proxy);
       }
     }
-    if(proxy->dispatch == NULL && proxyclosed == 1){
+    if(proxy->status == PROXY_CLOSED && proxyclosed == 1){
       rmfromepoll(epfd, proxy->con.fd);
-      close(proxy->con.fd);
-      RmConnectFromManager(proxy->con.fd);
-      proxy->con.events = 0;
-      proxy->con.fd = NULLFD;
+      freeProxyConnect(proxy);
       dispatch = proxy->dispatch;
       if(dispatch != NULL && dispatch->con.fd != NULLFD){
 	dispatch->proxy = NULL;
@@ -297,6 +271,7 @@ int handlehost(struct HTTPConnection * p)
 	  sprintf(requestbuf, "%d %s %s %s.\n", dispatch->header.status, proxy->header.method, proxy->header.uri, proxy->header.version);
 	  loginfo(requestbuf);
 	  cleanDispatchResponse(proxy->dispatch);
+	  proxy->status = PROXY_CLOSED;
 	}
 	else{
 	  proxy->con.events &= ~EPOLLOUT;
@@ -366,10 +341,7 @@ int handleremote(struct HTTPConnection * p)
 
       if(dispatch->con.buf->rdEOF != 1) notifyDispatchResponse(dispatch);
       rmfromepoll(epfd, dispatch->con.fd);
-      close(dispatch->con.fd);
-      RmConnectFromManager(dispatch->con.fd);
-      dispatch->con.events = 0;
-      dispatch->con.fd = NULLFD;
+      freeDispatchConnect(dispatch);
       List * node = findListNode(dispatchlist, (ListItem *)dispatch);
       rmFromList(&dispatchlist, node);
       addToList(&freeDispatchlist, node);
