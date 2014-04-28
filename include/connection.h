@@ -22,9 +22,10 @@ enum{
 
   */
 
-  PROXY_CLOSED = 1,
-  PROXY_FREE = 2,
-  PROXY_USED = 3
+  PROXY_CLOSED = 2, /* the socket is closed, but proxy-dispatch is not finished. */
+  PROXY_FREE = 3, /* the socket is closed and proxy-dispatch is finished. */
+  PROXY_USED = 4, /* the socket is still active and do proxy-dispatch work. */
+  PROXY_FINISHED = 5 /* proxy-dispatch is finished, but the socket is still active. */
 };
 
 struct ProxyConnection{
@@ -48,6 +49,11 @@ struct ConnectManager{
   void * conlist[MAXCONNECTIONS];
 };
 
+/*
+  A connection manage table for fast lookup.
+
+*/
+
 static struct ConnectManager manager;
 
 struct DispatchConnection * FindDispatchConnect(List * list, const char * host,  int status);
@@ -60,15 +66,21 @@ int RmConnectFromManager(int confd);
 
 struct ConnectManager * GetManager();
 
+int attachProxyDispatch(struct ProxyConnection * proxy, struct DispatchConnection * dispatch);
+
+int detachProxyDispatch(struct ProxyConnection * proxy, struct DispatchConnection * dispatch);
+
 struct ProxyConnection * newProxyConnect(int fd, int events, callbackfun callback);
 
-List * getProxyNode(List ** queue, int fd, int events, callbackfun callback);
+List * getProxyResource(List ** queue, int fd, int events, callbackfun callback);
 
 int freeProxyConnect(struct ProxyConnection * proxy);
 
-struct DispatchConnection * newDispatchConnect(int fd, callbackfun callback, struct ProxyConnection * proxy);
+int freeResource(List ** list, List ** freelist, ListItem * proxy);
 
-List * getDispatchNode(List ** queue, int fd, callbackfun callback, struct ProxyConnection * proxy);
+struct DispatchConnection * newDispatchConnect(int fd, callbackfun callback);
+
+List * getDispatchResource(List ** queue, int fd, callbackfun callback);
 
 int freeDispatchConnect(struct DispatchConnection * dispatch);
 
@@ -77,8 +89,6 @@ int notifyDispatchResponse(struct DispatchConnection * dispatch);
 int notifyProxyRequest(struct ProxyConnection * proxy);
 
 int DispatchResulted(const struct DispatchConnection * dispatch);
-
-int newProxyDispatch(struct ProxyConnection * proxy);
 
 int cleanDispatchResponse(struct DispatchConnection * dispatch);
 

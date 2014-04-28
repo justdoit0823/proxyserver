@@ -9,6 +9,8 @@
 
 #include "http.h"
 #include "stdio.h"
+#include "signal.h"
+#include "unistd.h"
 #include "stdlib.h"
 #include "initnet.h"
 #include "netdb.h"
@@ -183,6 +185,14 @@ int parseResponse(const char * responsestr,int bytes, struct responseHeader * he
   return HTTP_INVALID_HEADER;
 }
 
+void timeout(int signum)
+{
+  int err = errno;
+  printf("conenct time out.\n"); /* it's not safe. */
+  errno = err;
+  return;
+}
+
 int connecthost(const char * host, short port, int * fd)
 {
   struct sockaddr_in sain;
@@ -197,11 +207,17 @@ int connecthost(const char * host, short port, int * fd)
     return -1;
   }
   *fd = fetchfd;
+  __sighandler_t presighandler = signal(SIGALRM, timeout);
+  alarm(CONTIMEOUT);/* start timer */
   if(connect(fetchfd, (struct sockaddr *)&sain, sizeof(sain)) == -1){
-    sprintf(logbuf, "connect to remote host %s error", host);
-    logerr(logbuf, errno);
+    if(errno != EINTR){
+      sprintf(logbuf, "connect to remote host %s error", host);
+      logerr(logbuf, errno);
+    }
     return -1;
   }
+  alarm(0);/* conenct success and cancel timer. */
+  signal(SIGALRM, presighandler);
   return 0;
 }
 

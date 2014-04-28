@@ -113,7 +113,6 @@ void runepoll(int epfd, int listenfd)
   List * pcon, * pnext;
   ListItem * pitem;
   struct HTTPConnection * tempcon;
-  
   int eventfd, backevents;
   struct ConnectManager * mainmanager;
   initConnectManager();
@@ -140,7 +139,7 @@ void runepoll(int epfd, int listenfd)
 	else{
 	  List * nl;
 	  struct ProxyConnection * proxycon;
-	  nl = getProxyNode(&freeProxylist, eventfd, backevents, handlehost);
+	  nl = getProxyResource(&freeProxylist, eventfd, backevents, handlehost);
 	  proxycon = (struct ProxyConnection *)nl->item;
 	  AddConnectToManager(eventfd, proxycon);
 	  addToList(&proxylist, nl);
@@ -177,6 +176,7 @@ int handlehost(struct HTTPConnection * p)
   struct epoll_event reqev;
   struct ProxyConnection * proxy;
   struct DispatchConnection * dispatch;
+  char * readBuf;
   proxy = (struct ProxyConnection *)p;
   int parseResult, proxyclosed;
   char requestbuf[1024];
@@ -184,16 +184,22 @@ int handlehost(struct HTTPConnection * p)
     logwarn("invalid handle pointer.\n");
     return -1;
   }
-  if(proxy->con.events & EPOLLIN){
+  /*
+    check the proxy buffer, allocate if buffer is NULL.
+
+  */
+  if(proxy->con.buf == NULL){
+    proxy->con.buf = initHTTPBuffer(4096*4);
     if(proxy->con.buf == NULL){
-      proxy->con.buf = initHTTPBuffer(4096*4);
-      if(proxy->con.buf == NULL){
-	return -1;
-      }
+      logerr("allocate for proxy buffer.\n");
+      return -1;
     }
+  }
+  if(proxy->con.events & EPOLLIN){
     proxyclosed = 0;
     proxy->con.events &= ~EPOLLIN;
-    hrsum = recvfromhost(proxy->con.fd, proxy->con.buf->rdBuf + proxy->con.buf->bufferedBytes, &proxyclosed);
+    readBuf = proxy->con.buf->rdBuf + proxy->con.buf->bufferedBytes;
+    hrsum = recvfromhost(proxy->con.fd, readBuf, &proxyclosed);
     if(hrsum > 0){
       printf("recv %d bytes from host.\n", hrsum);
       proxy->con.buf->bufferedBytes += hrsum;
@@ -207,14 +213,13 @@ int handlehost(struct HTTPConnection * p)
       }
       if(proxy->dispatch == NULL){
 	if(proxy->header.host[0] != '\0'){
-	  if((dispatch = FindDispatchConnect(dispatchlist, proxy->header.host, PROXY_FREE)) != NULL){
+	  if((dispatch = FindDispatchConnect(dispatchlist, proxy->header.host, PROXY_FINISHED)) != NULL){
 	    /*
 	      The dispatch connection to the specified host already existed.
 	    */
 
 	    printf("host %s connection already existed.\n", proxy->header.host);
-	    dispatch->proxy = proxy;
-	    proxy->dispatch = dispatch;
+	    attachProxyDispatch(proxy, dispatch);
 	    dispatch->status = PROXY_USED;
 	  }
 	  else{
@@ -235,11 +240,12 @@ int handlehost(struct HTTPConnection * p)
 	    }
 	    List * pl;
 	    struct DispatchConnection * dispatchcon;
-	    pl = getDispatchNode(&freeDispatchlist, dispatchfd, handleremote, proxy);
+	    pl = getDispatchResource(&freeDispatchlist, dispatchfd, handleremote);
 	    dispatchcon = (struct DispatchConnection *)(pl->item);
 	    AddConnectToManager(dispatchfd, dispatchcon);
 	    addToList(&dispatchlist, pl);
-	    proxy->dispatch = dispatchcon;
+	    strcpy(dispatchcon->host, proxy->header.host);
+	    attachProxyDispatch(proxy, dispatchcon);
 	  }
 	}
       }
@@ -247,21 +253,26 @@ int handlehost(struct HTTPConnection * p)
 	notifyProxyRequest(proxy);
       }
     }
-    if(proxy->status == PROXY_CLOSED && proxyclosed == 1){
-      rmfromepoll(epfd, proxy->con.fd);
-      freeProxyConnect(proxy);
-      dispatch = proxy->dispatch;
-      if(dispatch != NULL && dispatch->con.fd != NULLFD){
-	dispatch->proxy = NULL;
-      }
-      List * node = findListNode(proxylist, (ListItem *)proxy);
-      rmFromList(&proxylist, node);
-      addToList(&freeProxylist, node);
+    if(proxyclosed == 1){
+      /*
+	avoid web browser open a connection, but send no data and close after.
+
+      */
+
+      if(proxy->con.buf->bufferedBytes == 0) proxy->status = PROXY_FREE; 
+      else if(proxy->status == PROXY_USED) proxy->status = PROXY_CLOSED;
+      else if(proxy->status == PROXY_FINISHED) proxy->status = PROXY_FREE;
     }
   }
   if(proxy->con.events & EPOLLOUT){
     dispatch = proxy->dispatch;
     if(proxy->con.buf != NULL && proxy->con.buf->wrBuf != NULL){
+      /*
+	when the dispatch response is recived and the socket is ready for write,
+	proxy sends the response to host.
+
+      */
+
       sendnum = proxy->con.buf->outBytes;
       if(proxy->con.buf->wrReady == 1 && sendnum > 0){
 	proxyclosed = 0;
@@ -270,15 +281,32 @@ int handlehost(struct HTTPConnection * p)
 	  printf("send %d bytes to host.\n", hssum);
 	  sprintf(requestbuf, "%d %s %s %s.\n", dispatch->header.status, proxy->header.method, proxy->header.uri, proxy->header.version);
 	  loginfo(requestbuf);
-	  cleanDispatchResponse(proxy->dispatch);
-	  proxy->status = PROXY_CLOSED;
+	  notifyProxyFinished(proxy);
+	  cleanDispatchResponse(dispatch);
 	}
 	else{
-	  proxy->con.events &= ~EPOLLOUT;
-	  printf("send error and bytes %d.\n", hssum);
+	  if(proxyclosed == 1){
+	    notifyProxyFinished(proxy);
+	    detachProxyDispatch(proxy, dispatch);
+	  }
+	  else{
+	    proxy->con.events &= ~EPOLLOUT;
+	    printf("send error and bytes %d.\n", hssum);
+	  }
 	}
       }
     }
+  }
+  if(proxy->status == PROXY_FREE){
+    /*
+      when the host close the connection and proxy send the response to host,
+      the proxy could also close the connection to free the socket.
+
+    */
+    
+    rmfromepoll(epfd, proxy->con.fd);
+    freeProxyConnect(proxy);
+    freeResource(&proxylist, &freeProxylist, (ListItem *)proxy);
   }
   return 0;
 }
@@ -292,6 +320,7 @@ int handleremote(struct HTTPConnection * p)
   dispatch = (struct DispatchConnection *)p;
   int parseResult, dispatchclosed;
   if(dispatch == NULL) return -1;
+  proxy = dispatch->proxy;
   if(dispatch->con.buf == NULL){
     dispatch->con.buf = initHTTPBuffer(4096*64);
     if(dispatch->con.buf == NULL){
@@ -319,7 +348,6 @@ int handleremote(struct HTTPConnection * p)
   if((dispatch->con.events & EPOLLIN)){
     char * bufpos = dispatch->con.buf->rdBuf + dispatch->con.buf->bufferedBytes;
     dispatchclosed = 0;
-    proxy = dispatch->proxy;
     dispatch->con.events &= ~EPOLLIN;
     rrsum = recvfromhost(dispatch->con.fd, bufpos, &dispatchclosed);
     if(rrsum > 0){
@@ -342,10 +370,16 @@ int handleremote(struct HTTPConnection * p)
       if(dispatch->con.buf->rdEOF != 1) notifyDispatchResponse(dispatch);
       rmfromepoll(epfd, dispatch->con.fd);
       freeDispatchConnect(dispatch);
-      List * node = findListNode(dispatchlist, (ListItem *)dispatch);
-      rmFromList(&dispatchlist, node);
-      addToList(&freeDispatchlist, node);
     }
+  }
+  if(dispatch->status == PROXY_FREE){
+    /*
+      when the dispatch socket is closed and proxy socket has sended the response to host,
+      then free the dispatch resource.
+
+    */
+
+    freeResource(&dispatchlist, &freeDispatchlist, (ListItem *)dispatch);
   }
   return 0;
 }

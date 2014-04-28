@@ -25,12 +25,14 @@
 
 #define NULLFD ((int)(-1))
 
+#define CONTIMEOUT 3
+
 #include "netinet/in.h"
 #include "stdio.h"
 
 
 //define supported http method
-static char * methods[] = {"GET", "POST", "HEAD", "PUT", NULL};
+static char * methods[] = {"GET", "POST", "HEAD", "PUT", "OPTIONS", NULL};
 
 //define HTTP_STATUS_CODE
 enum HTTP_STATUS{
@@ -152,6 +154,8 @@ struct in_addr * findNameList(const char * name);
 int hnametoaddr(const char * name,struct in_addr * addr);
 
 int checkmethod(const char * method);
+
+void timeout(int signum);
 
 int connecthost(const char * host, short port, int * fd);
 

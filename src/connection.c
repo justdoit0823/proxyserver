@@ -83,7 +83,7 @@ struct ProxyConnection * newProxyConnect(int fd, int events, callbackfun callbac
   return proxy;
 }
 
-List * getProxyNode(List ** queue, int fd, int events, callbackfun callback)
+List * getProxyResource(List ** queue, int fd, int events, callbackfun callback)
 {
   List * nl;
   struct ProxyConnection * proxycon;
@@ -114,7 +114,16 @@ int freeProxyConnect(struct ProxyConnection * proxy)
   return 0;
 }
 
-struct DispatchConnection * newDispatchConnect(int fd, callbackfun callback, struct ProxyConnection * proxy)
+int freeResource(List ** list, List ** freelist, ListItem * proxy)
+{
+  if(proxy == NULL) return -1;
+  List * node = findListNode(*list, proxy);
+  rmFromList(list, node);
+  addToList(freelist, node);
+  return 0;
+}
+
+struct DispatchConnection * newDispatchConnect(int fd, callbackfun callback)
 {
   struct DispatchConnection * dispatch = NULL;
   dispatch = malloc(sizeof(*dispatch));
@@ -127,18 +136,16 @@ struct DispatchConnection * newDispatchConnect(int fd, callbackfun callback, str
   dispatch->con.events = 0;
   dispatch->con.fun = callback;
   dispatch->con.buf = initHTTPBuffer(4096*64);
-  dispatch->proxy = proxy;
-  strcpy(dispatch->host, proxy->header.host);
   return dispatch;
 }
 
-List * getDispatchNode(List ** queue, int fd, callbackfun callback, struct ProxyConnection * proxy)
+List * getDispatchResource(List ** queue, int fd, callbackfun callback)
 {
   List * pl;
   struct DispatchConnection * dispatchcon;
   if(*queue == NULL){
     pl = newListNode();
-    dispatchcon = newDispatchConnect(fd, callback, proxy);
+    dispatchcon = newDispatchConnect(fd, callback);
     pl->item = (ListItem *)dispatchcon;
   }
   else{
@@ -147,7 +154,7 @@ List * getDispatchNode(List ** queue, int fd, callbackfun callback, struct Proxy
     dispatchcon = (struct DispatchConnection *)(pl->item);
     dispatchcon->con.fd = fd;
     dispatchcon->con.fun = callback;
-    dispatchcon->proxy = proxy;
+    dispatchcon->status = PROXY_USED;
   }
   return pl;
 }
@@ -159,6 +166,8 @@ int freeDispatchConnect(struct DispatchConnection * dispatch)
   RmConnectFromManager(dispatch->con.fd);
   dispatch->con.events = 0;
   dispatch->con.fd = NULLFD;
+  if(dispatch->status == PROXY_USED) dispatch->status = PROXY_CLOSED;
+  else if(dispatch->status == PROXY_FINISHED) dispatch->status = PROXY_FREE;
   return 0;
 }
 
@@ -191,6 +200,23 @@ int notifyProxyRequest(struct ProxyConnection * proxy)
   return 0;
 }
 
+int notifyProxyFinished(struct ProxyConnection * proxy)
+{
+  /*
+    when the proxy server sends request and recives response,
+    then notify the proxy and dispatch status.
+
+  */
+
+  struct DispatchConnection * dispatch;
+  if(proxy == NULL || (dispatch = proxy->dispatch) == NULL) return -1;
+  if(proxy->status == PROXY_CLOSED) proxy->status = PROXY_FREE;
+  else if(proxy->status == PROXY_USED) proxy->status = PROXY_FINISHED;
+  if(dispatch->status == PROXY_CLOSED) dispatch->status = PROXY_FREE;
+  else if(dispatch->status == PROXY_USED) dispatch->status = PROXY_FINISHED;
+  return 0;
+}
+
 int DispatchResulted(const struct DispatchConnection * dispatch)
 {
   /* check whether the dispatch response is over */
@@ -200,7 +226,6 @@ int DispatchResulted(const struct DispatchConnection * dispatch)
     return (dispatch->con.buf->bufferedBytes >= dispatch->header.length);
     }*/
   return (dispatch->con.buf->bufferedBytes >= dispatch->header.length);
-  return 0;
 }
 
 int cleanDispatchResponse(struct DispatchConnection * dispatch)
@@ -211,13 +236,11 @@ int cleanDispatchResponse(struct DispatchConnection * dispatch)
   dispatch->con.buf->bufferedBytes = 0;
   dispatch->con.buf->rdEOF = 0;
   memset(&(dispatch->header), 0, sizeof(dispatch->header));
-  dispatch->proxy = NULL;
-  dispatch->status = PROXY_FREE;
   memset(&(proxy->header), 0, sizeof(proxy->header));
   proxy->con.buf->wrReady = 0;
   proxy->con.buf->outBytes = 0;
   proxy->con.buf->wrBuf = NULL;
-  proxy->dispatch = NULL;
+  detachProxyDispatch(proxy, dispatch);
   return 0;
 }
 
@@ -231,5 +254,21 @@ int cleanProxyRequest(struct ProxyConnection * proxy)
   dispatch->con.buf->outBytes = 0;
   dispatch->con.buf->wrReady = 0;
   dispatch->con.buf->wrBuf = NULL;
+  return 0;
+}
+
+int attachProxyDispatch(struct ProxyConnection * proxy, struct DispatchConnection * dispatch)
+{
+  if(proxy == NULL || dispatch == NULL) return -1;
+  proxy->dispatch = dispatch;
+  dispatch->proxy = proxy;
+  return 0;
+}
+
+int detachProxyDispatch(struct ProxyConnection * proxy, struct DispatchConnection * dispatch)
+{
+  if(proxy == NULL || dispatch == NULL) return -1;
+  proxy->dispatch = NULL;
+  dispatch->proxy = NULL;
   return 0;
 }
