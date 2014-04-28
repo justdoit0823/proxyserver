@@ -4,6 +4,8 @@ INCLUDE_DIR = $(WORK_DIR)include/
 
 SOURCE_DIR = $(WORK_DIR)src/
 
+CMACRO = "-D _GNU_SOURCE"
+
 OBJECTS = http.o initnet.o jobqueue.o logging.o server.o \
 	pool.o fpoll.o list.o option.o connection.o
 
@@ -12,7 +14,7 @@ target proxyserver: $(OBJECTS)
 	rm -f $(OBJECTS)
 
 http.o: $(SOURCE_DIR)http.c $(INCLUDE_DIR)http.h
-	gcc -c -I $(INCLUDE_DIR) $(SOURCE_DIR)http.c
+	gcc -c $(CMACRO) -I $(INCLUDE_DIR) $(SOURCE_DIR)http.c
 
 initnet.o: $(SOURCE_DIR)initnet.c $(INCLUDE_DIR)initnet.h
 	gcc -c -I $(INCLUDE_DIR) $(SOURCE_DIR)initnet.c

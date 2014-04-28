@@ -207,7 +207,7 @@ int connecthost(const char * host, short port, int * fd)
     return -1;
   }
   *fd = fetchfd;
-  __sighandler_t presighandler = signal(SIGALRM, timeout);
+  sighandler_t presighandler = signal(SIGALRM, timeout);
   alarm(CONTIMEOUT);/* start timer */
   if(connect(fetchfd, (struct sockaddr *)&sain, sizeof(sain)) == -1){
     if(errno != EINTR){
