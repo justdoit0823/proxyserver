@@ -139,8 +139,6 @@ static char * whitelist[]={"www.google.com","www.twitter.com","www.facebook.com"
 
 static struct namenode * namelist;
 
-char * read_untill(int fd,const char * split);
-
 int parseRequest(const char * requeststr,struct requestHeader * header);
 
 int parseResponse(const char * responsestr, int bytes, struct responseHeader * header);
