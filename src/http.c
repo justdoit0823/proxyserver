@@ -192,7 +192,7 @@ int parseRequest(const char * requeststr,struct requestHeader * header)
 
   */
 
-  char * line, * split, * headend;
+  char * line, * split, * headend, * hostptr;
   char optionkey[SHORTSTRLEN];
   char optionval[SHORTSTRLEN];
   int portlen;
@@ -209,7 +209,13 @@ int parseRequest(const char * requeststr,struct requestHeader * header)
   }
   if((line = strstr(requeststr,"\r\n")) == NULL) return -1;
   else line += 2;
-  if(sscanf(line,"%s%s",optionkey,header->host) != 2){
+  hostptr = strstr(line, "Host:");
+  if(hostptr == NULL)
+  {
+	  printf("invalid http header!\n");
+	  return HTTP_INVALID_HEADER;
+  }
+  if(sscanf(hostptr,"%s%s",optionkey,header->host) != 2){
     printf("invalid http header!\n");
     return HTTP_INVALID_HEADER;
   }
